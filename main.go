@@ -27,6 +27,7 @@ func main() {
 		log.Println(err)
 		return
 	}
+	log.Printf("%d domain records obtained\n", len(domains))
 
 	var wg sync.WaitGroup
 	wg.Add(len(settings.Servers))
