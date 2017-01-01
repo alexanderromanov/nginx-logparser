@@ -25,8 +25,8 @@ type TableEntity struct {
 func (c *TableServiceClient) InsertEntity(table AzureTable, entity TableEntity) error {
 	var err error
 
-	if sc, err := c.execTable(table, entity, false, "POST"); err != nil {
-		return checkRespCode(sc, []int{http.StatusCreated})
+	if statusCode, err := c.execTable(table, entity, false, "POST"); err != nil {
+		return checkRespCode(statusCode, []int{http.StatusCreated})
 	}
 
 	return err

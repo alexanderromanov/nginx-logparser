@@ -18,7 +18,9 @@ type TableServiceClient struct {
 type AzureTable string
 
 const (
-	tablesURIPath = "/Tables"
+	tablesURIPath            = "/Tables"
+	statusTableAlreadyExists = "TableAlreadyExists"
+	statusCreated            = "Created"
 )
 
 type createTableRequest struct {
@@ -39,7 +41,7 @@ func (c *TableServiceClient) getStandardHeaders() map[string]string {
 
 // CreateTable creates the table given the specific
 // name. This function fails if the name is not compliant
-// with the specification or the tables already exists.
+// with the specification.
 func (c *TableServiceClient) CreateTable(table AzureTable) error {
 	uri := c.client.getEndpoint(tableServiceName, tablesURIPath, url.Values{})
 
@@ -47,7 +49,6 @@ func (c *TableServiceClient) CreateTable(table AzureTable) error {
 
 	req := createTableRequest{TableName: string(table)}
 	buf := new(bytes.Buffer)
-
 	if err := json.NewEncoder(buf).Encode(req); err != nil {
 		return err
 	}
@@ -55,13 +56,12 @@ func (c *TableServiceClient) CreateTable(table AzureTable) error {
 	headers["Content-Length"] = fmt.Sprintf("%d", buf.Len())
 
 	resp, err := c.client.execTable("POST", uri, headers, buf)
-
 	if err != nil {
 		return err
 	}
 	defer resp.body.Close()
 
-	if err := checkRespCode(resp.statusCode, []int{http.StatusCreated}); err != nil {
+	if err := checkRespStatus(resp.status, []string{statusCreated, statusTableAlreadyExists}); err != nil {
 		return err
 	}
 

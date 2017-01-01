@@ -51,6 +51,7 @@ type Client struct {
 
 type storageResponse struct {
 	statusCode int
+	status     string
 	headers    http.Header
 	body       io.ReadCloser
 }
@@ -91,19 +92,11 @@ type odataErrorMessage struct {
 // UnexpectedStatusCodeError is returned when a storage service responds with neither an error
 // nor with an HTTP status code indicating success.
 type UnexpectedStatusCodeError struct {
-	allowed []int
-	got     int
+	got interface{}
 }
 
 func (e UnexpectedStatusCodeError) Error() string {
-	s := func(i int) string { return fmt.Sprintf("%d %s", i, http.StatusText(i)) }
-
-	got := s(e.got)
-	expected := []string{}
-	for _, v := range e.allowed {
-		expected = append(expected, s(v))
-	}
-	return fmt.Sprintf("storage: status code from service response is %s; was expecting %s", got, strings.Join(expected, " or "))
+	return fmt.Sprintf("storage: status code from service response is %v", e.got)
 }
 
 // NewBasicClient constructs a Client with given storage service name and
@@ -406,6 +399,7 @@ func (c Client) execInternalJSON(verb, url string, headers map[string]string, bo
 	respToRet := &odataResponse{}
 	respToRet.body = resp.Body
 	respToRet.statusCode = resp.StatusCode
+	respToRet.status = resp.Status
 	respToRet.headers = resp.Header
 
 	statusCode := resp.StatusCode
@@ -483,5 +477,16 @@ func checkRespCode(respCode int, allowed []int) error {
 			return nil
 		}
 	}
-	return UnexpectedStatusCodeError{allowed, respCode}
+	return UnexpectedStatusCodeError{respCode}
+}
+
+// checkRespStatus returns UnexpectedStatusError if the given response status is not
+// one of the allowed statuses; otherwise nil.
+func checkRespStatus(respStatus string, allowed []string) error {
+	for _, v := range allowed {
+		if respStatus == v {
+			return nil
+		}
+	}
+	return UnexpectedStatusCodeError{respStatus}
 }

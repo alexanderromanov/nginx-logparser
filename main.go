@@ -125,9 +125,9 @@ func getSettings(settingsFile string) (applicationSettings, error) {
 		},
 		Servers: servers,
 		AzureStorage: consumptions.AzureStorageSettings{
-			AccountName: settings.Azure.AccountName,
-			Key:         settings.Azure.Key,
-			TableName:   settings.Azure.Table,
+			AccountName:       settings.Azure.AccountName,
+			Key:               settings.Azure.Key,
+			TableNameTemplate: settings.Azure.TableTemplate,
 		},
 	}, nil
 }
@@ -145,9 +145,9 @@ type settingsJSON struct {
 }
 
 type azureJSON struct {
-	AccountName string `json:"accountName"`
-	Key         string `json:"key"`
-	Table       string `json:"table"`
+	AccountName   string `json:"accountName"`
+	Key           string `json:"key"`
+	TableTemplate string `json:"tableTemplate"`
 }
 
 type websitesProviderJSON struct {

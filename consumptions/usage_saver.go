@@ -12,9 +12,9 @@ import (
 
 // AzureStorageSettings contains information necessary to save consumption information into Azure Storage tables
 type AzureStorageSettings struct {
-	AccountName string
-	Key         string
-	TableName   string
+	AccountName       string
+	Key               string
+	TableNameTemplate string
 }
 
 // SaveUsageRecords saves report to azure storage table
@@ -24,12 +24,12 @@ func SaveUsageRecords(settings AzureStorageSettings, usageStats []*UsageStats, s
 		return err
 	}
 
-	usageTable := storage.AzureTable(settings.TableName)
 	client := storageClient.GetTableService()
 
 	var wg sync.WaitGroup
-	// maximum of 15 requests can be sent the same time
-	var throttle = make(chan bool, 15)
+	// maximum of 10 requests can be sent the same time
+	// todo aromanov: consider making batch request(s) instead
+	var throttle = make(chan bool, 10)
 	now := time.Now()
 	for _, stat := range usageStats {
 		fields := make(map[string]interface{})
@@ -37,6 +37,8 @@ func SaveUsageRecords(settings AzureStorageSettings, usageStats []*UsageStats, s
 		fields["Files"] = stat.Files
 		fields["Dynamic"] = stat.Dynamic
 		fields["Other"] = stat.Other
+
+		usageTable := getOrCreateUsageTable(client, settings, stat.Time)
 
 		entity := storage.TableEntity{
 			PartitionKey: strconv.Itoa(stat.WebsiteID),
@@ -61,4 +63,18 @@ func SaveUsageRecords(settings AzureStorageSettings, usageStats []*UsageStats, s
 
 func generateRowKey(stats *UsageStats, server string, now time.Time) string {
 	return fmt.Sprintf("%d-%s-%d", stats.Time.Unix(), server, now.Unix())
+}
+
+var tables = make([]storage.AzureTable, 3)
+
+func getOrCreateUsageTable(client storage.TableServiceClient, settings AzureStorageSettings, requestTime time.Time) storage.AzureTable {
+	result := storage.AzureTable(settings.TableNameTemplate + requestTime.Format("200601"))
+	for _, table := range tables {
+		if table == result {
+			return result
+		}
+	}
+
+	_ = client.CreateTable(result)
+	return result
 }
