@@ -119,20 +119,8 @@ func getRecords(client *sftp.Client, fileName string, readFrom int64) ([]*LogRec
 
 	log.Printf("%d bytes read from file %s", bytesRead, fileName)
 
-	var result []*LogRecord
-	var failedLines []string
-	scanner := bufio.NewScanner(bytes.NewReader(contentRead))
-	for scanner.Scan() {
-		logLine := scanner.Text()
-		parsedLine, err := parseLine(logLine)
-
-		if err != nil {
-			failedLines = append(failedLines, logLine)
-			continue
-		}
-
-		result = append(result, parsedLine)
-	}
+	reader := bytes.NewReader(contentRead)
+	result, failedLines := parseLogs(reader)
 
 	return result, failedLines, bytesRead, nil
 }

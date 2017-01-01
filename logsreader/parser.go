@@ -1,7 +1,9 @@
 package logsreader
 
 import (
+	"bufio"
 	"errors"
+	"io"
 	"regexp"
 	"strconv"
 	"strings"
@@ -72,6 +74,25 @@ func parseLine(line string) (*LogRecord, error) {
 		UserAgent:      results[8],
 		Size:           size,
 	}, nil
+}
+
+func parseLogs(reader io.Reader) ([]*LogRecord, []string) {
+	var result []*LogRecord
+	var failedLines []string
+	scanner := bufio.NewScanner(reader)
+	for scanner.Scan() {
+		logLine := scanner.Text()
+		parsedLine, err := parseLine(logLine)
+
+		if err != nil {
+			failedLines = append(failedLines, logLine)
+			continue
+		}
+
+		result = append(result, parsedLine)
+	}
+
+	return result, failedLines
 }
 
 var lineSplitRegex = regexp.MustCompile(`\"(.*?)\"`)
