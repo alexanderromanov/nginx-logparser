@@ -18,7 +18,7 @@ type AzureStorageSettings struct {
 }
 
 // SaveUsageRecords saves report to azure storage table
-func SaveUsageRecords(settings AzureStorageSettings, usageStats []*UsageStats, serverName string) error {
+func SaveUsageRecords(settings AzureStorageSettings, usageStats []*ConsumptionRecord, serverName string) error {
 	storageClient, err := storage.NewBasicClient(settings.AccountName, settings.Key)
 	if err != nil {
 		return err
@@ -35,8 +35,11 @@ func SaveUsageRecords(settings AzureStorageSettings, usageStats []*UsageStats, s
 		fields := make(map[string]interface{})
 		fields["Time"] = stat.Time.Unix()
 		fields["Files"] = stat.Files
+		fields["FilesCount"] = stat.FilesCount
 		fields["Dynamic"] = stat.Dynamic
+		fields["DynamicCount"] = stat.DynamicCount
 		fields["Other"] = stat.Other
+		fields["OtherCount"] = stat.OtherCount
 
 		usageTable := getOrCreateUsageTable(client, settings, stat.Time)
 
@@ -61,13 +64,16 @@ func SaveUsageRecords(settings AzureStorageSettings, usageStats []*UsageStats, s
 	return nil
 }
 
-func generateRowKey(stats *UsageStats, server string, now time.Time) string {
+func generateRowKey(stats *ConsumptionRecord, server string, now time.Time) string {
 	return fmt.Sprintf("%d-%s-%d", stats.Time.Unix(), server, now.Unix())
 }
 
 var tables = make([]storage.AzureTable, 3)
 
-func getOrCreateUsageTable(client storage.TableServiceClient, settings AzureStorageSettings, requestTime time.Time) storage.AzureTable {
+func getOrCreateUsageTable(
+	client storage.TableServiceClient,
+	settings AzureStorageSettings,
+	requestTime time.Time) storage.AzureTable {
 	result := storage.AzureTable(settings.TableNameTemplate + requestTime.Format("200601"))
 	for _, table := range tables {
 		if table == result {

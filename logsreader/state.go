@@ -3,8 +3,8 @@ package logsreader
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"io/ioutil"
+	"os"
 )
 
 const (
@@ -17,15 +17,15 @@ type State struct {
 	// If this name changes it means that nginx has started new log file and archived access.log that we were reading last time
 	NotZippedLogFile string
 
-	// ReadFromAccessLog stores Number of bytes that were already read from access.log
-	ReadFromAccessLog int64
+	// BytesRead stores Number of bytes that were already read from access.log
+	BytesRead int
 }
 
 // GetState returns State object for given server
 func GetState(conn ConnectionInfo) (State, error) {
 	data, err := ioutil.ReadFile(buildStateFileName(conn))
 	if err != nil {
-		if os.IsNotExist(err){
+		if os.IsNotExist(err) {
 			err = nil
 		}
 		return State{}, err
@@ -39,8 +39,8 @@ func GetState(conn ConnectionInfo) (State, error) {
 	}
 
 	return State{
-		NotZippedLogFile:  stats.LastLog,
-		ReadFromAccessLog: stats.BytesRead,
+		NotZippedLogFile: stats.LastLog,
+		BytesRead:        stats.BytesRead,
 	}, nil
 }
 
@@ -48,7 +48,7 @@ func GetState(conn ConnectionInfo) (State, error) {
 func SaveState(conn ConnectionInfo, stats State) error {
 	s := stateJSON{
 		LastLog:   stats.NotZippedLogFile,
-		BytesRead: stats.ReadFromAccessLog,
+		BytesRead: stats.BytesRead,
 	}
 
 	data, err := json.Marshal(s)
@@ -67,5 +67,5 @@ func buildStateFileName(conn ConnectionInfo) string {
 
 type stateJSON struct {
 	LastLog   string `json:"log"`
-	BytesRead int64  `json:"read"`
+	BytesRead int    `json:"read"`
 }

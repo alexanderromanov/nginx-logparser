@@ -2,12 +2,11 @@ package logsreader
 
 import (
 	"bufio"
-	"bytes"
 	"fmt"
-	"io"
 	"os"
 	"path"
 	"strings"
+	"sync"
 
 	"log"
 
@@ -15,15 +14,42 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-// LogReaderResult stores information about log reading attempt
-type LogReaderResult struct {
-	UnparsedLines []string
-	Records       []*LogRecord
-	ReaderState   *State
+// ReadLogs read logs from server
+func ReadLogs(connection ConnectionInfo, readerState State, recordProcessor func(*LogRecord)) (*State, error) {
+	sftp, err := connectToServer(connection)
+	if err != nil {
+		return nil, err
+	}
+	defer sftp.Close()
+
+	notZipped := findNotZippedLog(sftp)
+
+	var logOffset int
+	if readerState.NotZippedLogFile == notZipped {
+		logOffset = readerState.BytesRead
+	} else {
+		logOffset = 0
+
+		_, err = processRecords(sftp, notZipped, readerState.BytesRead, recordProcessor)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	bytesRead, err := processRecords(sftp, "/var/log/nginx/access.log", logOffset, recordProcessor)
+	if err != nil {
+		return nil, err
+	}
+
+	newState := &State{
+		NotZippedLogFile: notZipped,
+		BytesRead:        bytesRead + logOffset,
+	}
+
+	return newState, nil
 }
 
-// ReadLogs read logs from server
-func ReadLogs(connection ConnectionInfo, readerState State) (LogReaderResult, error) {
+func connectToServer(connection ConnectionInfo) (*sftp.Client, error) {
 	clientConfig := &ssh.ClientConfig{
 		User: connection.UserName,
 		Auth: []ssh.AuthMethod{
@@ -35,18 +61,15 @@ func ReadLogs(connection ConnectionInfo, readerState State) (LogReaderResult, er
 	client, err := ssh.Dial("tcp", addressWithPort, clientConfig)
 
 	if err != nil {
-		return LogReaderResult{}, err
+		return nil, err
 	}
 
 	sftp, err := sftp.NewClient(client)
 	if err != nil {
-		return LogReaderResult{}, err
+		return nil, err
 	}
-	defer sftp.Close()
 
-	notZipped := findNotZippedLog(sftp)
-
-	return readAccessLog(sftp, readerState, notZipped)
+	return sftp, nil
 }
 
 func findNotZippedLog(sftp *sftp.Client) string {
@@ -67,94 +90,48 @@ func findNotZippedLog(sftp *sftp.Client) string {
 	return ""
 }
 
-// readAccessLog reads currently active log file (access.log) and log file from previous day starting from saved position
-func readAccessLog(client *sftp.Client, previousStats State, currentNotZippedName string) (LogReaderResult, error) {
-	var records []*LogRecord
-	var failedLines []string
-	logOffset := previousStats.ReadFromAccessLog
-	if previousStats.NotZippedLogFile != currentNotZippedName {
-		var err error
-		records, failedLines, _, err = getRecords(client, currentNotZippedName, logOffset)
-		if err != nil {
-			return LogReaderResult{}, err
-		}
-
-		// access.log is a fresh file, so we need to reset offset
-		logOffset = 0
-	}
-
-	accessRecords, accessFailedLines, nBytes, err := getRecords(client, "/var/log/nginx/access.log", logOffset)
-	if err != nil {
-		return LogReaderResult{}, err
-	}
-
-	records = append(records, accessRecords...)
-	failedLines = append(failedLines, accessFailedLines...)
-
-	result := LogReaderResult{
-		UnparsedLines: failedLines,
-		Records:       records,
-		ReaderState: &State{
-			NotZippedLogFile:  currentNotZippedName,
-			ReadFromAccessLog: nBytes + logOffset},
-	}
-
-	return result, nil
-}
-
-func getRecords(client *sftp.Client, fileName string, readFrom int64) ([]*LogRecord, []string, int64, error) {
+func processRecords(client *sftp.Client, fileName string, readFrom int, recordProcessor func(*LogRecord)) (int, error) {
 	log.Printf("Opening file %s\n", fileName)
 	file, err := client.Open(fileName)
 	if err != nil {
-		return nil, nil, 0, err
+		return 0, err
 	}
 
 	defer file.Close()
 
+	_, err = file.Seek(int64(readFrom), os.SEEK_SET)
+	if err != nil {
+		return 0, err
+	}
+
 	log.Printf("Reading file %s from position %d\n", fileName, readFrom)
-	contentRead, bytesRead, err := readFileToTheEnd(file, readFrom)
-	if err != nil {
-		return nil, nil, 0, err
-	}
 
-	log.Printf("%d bytes read from file %s", bytesRead, fileName)
+	bytesRead := 0
+	scanner := bufio.NewScanner(file)
 
-	reader := bytes.NewReader(contentRead)
-	result, failedLines := parseLogs(reader)
+	var throttle = make(chan bool, 200)
+	var wg sync.WaitGroup
+	for scanner.Scan() {
+		logLine := scanner.Text()
 
-	return result, failedLines, bytesRead, nil
-}
-
-func readFileToTheEnd(file *sftp.File, readFrom int64) ([]byte, int64, error) {
-	_, err := file.Seek(readFrom, os.SEEK_SET)
-	if err != nil {
-		return nil, 0, err
-	}
-
-	bytesRead := int64(0)
-	r := bufio.NewReader(file)
-	buf := make([]byte, 0, 40*1024)
-	contentRead := make([]byte, 10*1024)
-	for {
-		n, err := r.Read(buf[:cap(buf)])
-		buf = buf[:n]
-		if n == 0 {
-			if err == nil {
-				continue
+		throttle <- true
+		wg.Add(1)
+		go func(logLine string) {
+			defer wg.Done()
+			logRecord, err := parseLine(logLine)
+			if err != nil {
+				log.Printf("Failed to parse %s\n", logLine)
+				return
 			}
-			if err == io.EOF {
-				break
-			}
-			return nil, bytesRead, err
-		}
-		bytesRead += int64(len(buf))
 
-		contentRead = append(contentRead, buf...)
+			recordProcessor(logRecord)
+			<-throttle
+		}(logLine)
 
-		if err != nil && err != io.EOF {
-			return nil, bytesRead, err
-		}
+		// 1 is length of line separator (\n)
+		bytesRead += len(logLine) + 1
 	}
+	wg.Wait()
 
-	return contentRead, bytesRead, nil
+	return bytesRead, nil
 }

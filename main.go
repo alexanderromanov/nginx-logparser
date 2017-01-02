@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"io/ioutil"
 	"log"
-	"os"
 	"sync"
 
 	"github.com/alexanderromanov/nginx-logparser/consumptions"
@@ -13,8 +12,7 @@ import (
 )
 
 const (
-	unparsedLinesLogFileName = "unparsed.txt"
-	settingsFile             = "settings.json"
+	settingsFile = "settings.json"
 )
 
 func main() {
@@ -45,52 +43,35 @@ func main() {
 }
 
 func processLogs(settings applicationSettings, conn logsreader.ConnectionInfo, domains map[string]*websites.WebsiteInfo) error {
-	log.Printf("Getting connection state for %s\n", conn.ServerName())
-	prevStats, err := logsreader.GetState(conn)
+	serverName := conn.ServerName()
+	logForServer := func(format string, v ...interface{}) {
+		log.Printf(serverName+" - "+format+"\n", v...)
+	}
+
+	logForServer("Getting connection state")
+	prevState, err := logsreader.GetState(conn)
 	if err != nil {
 		return err
 	}
 
-	readerResult, err := logsreader.ReadLogs(conn, prevStats)
+	usages := consumptions.NewUsagesCollection(domains)
+
+	newState, err := logsreader.ReadLogs(conn, prevState, usages.AddRecord)
 	if err != nil {
 		return err
 	}
 
-	log.Printf("Calculating traffic consumption for %s\n", conn.ServerName())
-	trafficConsumption := consumptions.GetTrafficConsumption(readerResult.Records, domains)
-
-	log.Printf("Saving connection state for %s\n", conn.ServerName())
-	err = logsreader.SaveState(conn, *readerResult.ReaderState)
-
-	log.Printf("Saving unparsed lines for %s\n", conn.ServerName())
-	saveUnparsedLines(readerResult.UnparsedLines)
-
-	log.Printf("Saving consumptions for %s\n", conn.ServerName())
-	err = consumptions.SaveUsageRecords(settings.AzureStorage, trafficConsumption, conn.ServerName())
-	if err != nil {
-		return err
+	for _, domain := range usages.GetUnknownDomains() {
+		logForServer("Cannot find info for %s requested %d times", domain.Domain, domain.Requested)
 	}
 
-	return nil
-}
+	logForServer("Saving connection state")
+	err = logsreader.SaveState(conn, *newState)
 
-func saveUnparsedLines(lines []string) error {
-	if len(lines) == 0 {
-		return nil
-	}
-
-	f, err := os.OpenFile(unparsedLinesLogFileName, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	for _, s := range lines {
-		if _, err = f.Write([]byte(s)); err != nil {
-			return err
-		}
-	}
-	return nil
+	consumptionRecords := usages.GetTrafficConsumption()
+	logForServer("Saving %d consumption records", len(consumptionRecords))
+	err = consumptions.SaveUsageRecords(settings.AzureStorage, consumptionRecords, serverName)
+	return err
 }
 
 // getSettings returns application settings stored in settingsFile
