@@ -25,18 +25,15 @@ type TableEntity struct {
 func (c *TableServiceClient) InsertEntity(table AzureTable, entity TableEntity) error {
 	var err error
 
-	if statusCode, err := c.execTable(table, entity, false, "POST"); err != nil {
+	if statusCode, err := c.execTable(table, entity, "POST"); err != nil {
 		return checkRespCode(statusCode, []int{http.StatusCreated})
 	}
 
 	return err
 }
 
-func (c *TableServiceClient) execTable(table AzureTable, entity TableEntity, specifyKeysInURL bool, method string) (int, error) {
+func (c *TableServiceClient) execTable(table AzureTable, entity TableEntity, method string) (int, error) {
 	uri := c.client.getEndpoint(tableServiceName, pathForTable(table), url.Values{})
-	if specifyKeysInURL {
-		uri += fmt.Sprintf("(PartitionKey='%s',RowKey='%s')", url.QueryEscape(entity.PartitionKey), url.QueryEscape(entity.RowKey))
-	}
 
 	headers := c.getStandardHeaders()
 

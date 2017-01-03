@@ -2,11 +2,8 @@
 package storage
 
 import (
-	"bytes"
 	"encoding/base64"
 	"encoding/json"
-	"encoding/xml"
-	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -14,7 +11,6 @@ import (
 	"net/url"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 )
 
@@ -27,12 +23,7 @@ const (
 	// basic client is created.
 	DefaultAPIVersion = "2015-02-21"
 
-	defaultUseHTTPS = true
-
-	blobServiceName  = "blob"
 	tableServiceName = "table"
-	queueServiceName = "queue"
-	fileServiceName  = "file"
 )
 
 // Client is the object that needs to be constructed to perform
@@ -44,7 +35,6 @@ type Client struct {
 
 	accountName string
 	accountKey  []byte
-	useHTTPS    bool
 	baseURL     string
 	apiVersion  string
 }
@@ -102,13 +92,13 @@ func (e UnexpectedStatusCodeError) Error() string {
 // NewBasicClient constructs a Client with given storage service name and
 // key.
 func NewBasicClient(accountName, accountKey string) (Client, error) {
-	return NewClient(accountName, accountKey, DefaultBaseURL, DefaultAPIVersion, defaultUseHTTPS)
+	return newClient(accountName, accountKey, DefaultBaseURL, DefaultAPIVersion)
 }
 
-// NewClient constructs a Client. This should be used if the caller wants
+// newClient constructs a Client. This should be used if the caller wants
 // to specify whether to use HTTPS, a specific REST API version or a custom
 // storage endpoint than Azure Public Cloud.
-func NewClient(accountName, accountKey, blobServiceBaseURL, apiVersion string, useHTTPS bool) (Client, error) {
+func newClient(accountName, accountKey, blobServiceBaseURL, apiVersion string) (Client, error) {
 	var c Client
 	if accountName == "" {
 		return c, fmt.Errorf("azure: account name required")
@@ -126,17 +116,14 @@ func NewClient(accountName, accountKey, blobServiceBaseURL, apiVersion string, u
 	return Client{
 		accountName: accountName,
 		accountKey:  key,
-		useHTTPS:    useHTTPS,
 		baseURL:     blobServiceBaseURL,
 		apiVersion:  apiVersion,
 	}, nil
 }
 
 func (c Client) getBaseURL(service string) string {
-	scheme := "http"
-	if c.useHTTPS {
-		scheme = "https"
-	}
+	scheme := "https"
+
 	host := fmt.Sprintf("%s.%s.%s", c.accountName, service, c.baseURL)
 
 	u := &url.URL{
@@ -181,13 +168,6 @@ func (c Client) getAuthorizationHeader(verb, url string, headers map[string]stri
 
 	canonicalizedString := c.buildCanonicalizedString(verb, headers, canonicalizedResource)
 	return c.createAuthorizationHeader(canonicalizedString), nil
-}
-
-func (c Client) getStandardHeaders() map[string]string {
-	return map[string]string{
-		"x-ms-version": c.apiVersion,
-		"x-ms-date":    currentTimeRfc1123Formatted(),
-	}
 }
 
 func (c Client) buildCanonicalizedHeader(headers map[string]string) string {
@@ -310,76 +290,6 @@ func (c Client) buildCanonicalizedString(verb string, headers map[string]string,
 	return canonicalizedString
 }
 
-func (c Client) exec(verb, url string, headers map[string]string, body io.Reader) (*storageResponse, error) {
-	authHeader, err := c.getAuthorizationHeader(verb, url, headers)
-	if err != nil {
-		return nil, err
-	}
-	headers["Authorization"] = authHeader
-	if err != nil {
-		return nil, err
-	}
-
-	req, err := http.NewRequest(verb, url, body)
-	if err != nil {
-		return nil, errors.New("azure/storage: error creating request: " + err.Error())
-	}
-
-	if clstr, ok := headers["Content-Length"]; ok {
-		// content length header is being signed, but completely ignored by golang.
-		// instead we have to use the ContentLength property on the request struct
-		// (see https://golang.org/src/net/http/request.go?s=18140:18370#L536 and
-		// https://golang.org/src/net/http/transfer.go?s=1739:2467#L49)
-		req.ContentLength, err = strconv.ParseInt(clstr, 10, 64)
-		if err != nil {
-			return nil, err
-		}
-	}
-	for k, v := range headers {
-		req.Header.Add(k, v)
-	}
-
-	httpClient := c.HTTPClient
-	if httpClient == nil {
-		httpClient = http.DefaultClient
-	}
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-
-	statusCode := resp.StatusCode
-	if statusCode >= 400 && statusCode <= 505 {
-		var respBody []byte
-		respBody, err = readResponseBody(resp)
-		if err != nil {
-			return nil, err
-		}
-
-		if len(respBody) == 0 {
-			// no error in response body
-			err = fmt.Errorf("storage: service returned without a response body (%s)", resp.Status)
-		} else {
-			// response contains storage service error object, unmarshal
-			storageErr, errIn := serviceErrFromXML(respBody, resp.StatusCode, resp.Header.Get("x-ms-request-id"))
-			if err != nil { // error unmarshaling the error response
-				err = errIn
-			}
-			err = storageErr
-		}
-		return &storageResponse{
-			statusCode: resp.StatusCode,
-			headers:    resp.Header,
-			body:       ioutil.NopCloser(bytes.NewReader(respBody)), /* restore the body */
-		}, err
-	}
-
-	return &storageResponse{
-		statusCode: resp.StatusCode,
-		headers:    resp.Header,
-		body:       resp.Body}, nil
-}
-
 func (c Client) execInternalJSON(verb, url string, headers map[string]string, body io.Reader) (*odataResponse, error) {
 	req, err := http.NewRequest(verb, url, body)
 	for k, v := range headers {
@@ -452,16 +362,6 @@ func readResponseBody(resp *http.Response) ([]byte, error) {
 		err = nil
 	}
 	return out, err
-}
-
-func serviceErrFromXML(body []byte, statusCode int, requestID string) (AzureStorageServiceError, error) {
-	var storageErr AzureStorageServiceError
-	if err := xml.Unmarshal(body, &storageErr); err != nil {
-		return storageErr, err
-	}
-	storageErr.StatusCode = statusCode
-	storageErr.RequestID = requestID
-	return storageErr, nil
 }
 
 func (e AzureStorageServiceError) Error() string {
