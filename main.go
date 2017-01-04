@@ -6,6 +6,8 @@ import (
 	"log"
 	"sync"
 
+	"path/filepath"
+
 	"github.com/alexanderromanov/nginx-logparser/consumptions"
 	"github.com/alexanderromanov/nginx-logparser/logsreader"
 	"github.com/alexanderromanov/nginx-logparser/websites"
@@ -80,7 +82,12 @@ func processLogs(settings applicationSettings, conn logsreader.ConnectionInfo, d
 
 // getSettings returns application settings stored in settingsFile
 func getSettings(settingsFile string) (applicationSettings, error) {
-	data, err := ioutil.ReadFile(settingsFile)
+	fullPath, err := filepath.Abs(settingsFile)
+	if err != nil {
+		return applicationSettings{}, err
+	}
+
+	data, err := ioutil.ReadFile(fullPath)
 	if err != nil {
 		return applicationSettings{}, err
 	}
