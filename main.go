@@ -69,8 +69,8 @@ func processLogs(settings applicationSettings, conn logsreader.ConnectionInfo, d
 	err = logsreader.SaveState(conn, *newState)
 
 	consumptionRecords := usages.GetTrafficConsumption()
-	logForServer("Saving %d consumption records", len(consumptionRecords))
-	err = consumptions.SaveUsageRecords(settings.AzureStorage, consumptionRecords, serverName)
+	logForServer("Saving consumption records for %d websites", len(consumptionRecords))
+	err = consumptions.SaveConsumptions(settings.AzureStorage, consumptionRecords, serverName)
 	return err
 }
 

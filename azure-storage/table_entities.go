@@ -23,23 +23,92 @@ type TableEntity struct {
 // InsertEntity inserts an entity in the specified table.
 // The function fails if there is an entity with the same PartitionKey and RowKey in the table.
 func (c *TableServiceClient) InsertEntity(table AzureTable, entity TableEntity) error {
-	var err error
-
-	if statusCode, err := c.execTable(table, entity, "POST"); err != nil {
+	statusCode, err := c.execTable(table, entity, "POST")
+	if err != nil {
 		return checkRespCode(statusCode, []int{http.StatusCreated})
 	}
+	return nil
+}
 
-	return err
+// BatchInsert inserts set of entities in the specified table.
+// Function assumes that batch is formed properly
+func (c *TableServiceClient) BatchInsert(table AzureTable, entities []*TableEntity) error {
+	uri := c.client.getEndpoint(tableServiceName, pathForTable("$batch"), url.Values{})
+	uuid, err := pseudoUUID()
+	if err != nil {
+		return err
+	}
+	boundary := "batch_" + uuid
+	headers := map[string]string{
+		"x-ms-version":          "2015-02-21",
+		"x-ms-date":             currentTimeRfc1123Formatted(),
+		"Accept-Charset":        "UTF-8",
+		"Content-Type":          "multipart/mixed; boundary=" + boundary,
+		"DataServiceVersion":    "3.0;",
+		"MaxDataServiceVersion": "3.0;NetFx",
+	}
+	content, err := buildBatchContent(c, boundary, table, entities)
+	if err != nil {
+		return err
+	}
+	headers["Content-Length"] = fmt.Sprintf("%d", content.Len())
+
+	resp, err := c.client.execTable("POST", uri, headers, content)
+	if err != nil {
+		return err
+	}
+	defer resp.body.Close()
+
+	return nil
+}
+
+func buildBatchContent(c *TableServiceClient, boundary string, table AzureTable, entities []*TableEntity) (*bytes.Buffer, error) {
+	uuid, err := pseudoUUID()
+	if err != nil {
+		return nil, err
+	}
+	changeset := "changeset_" + uuid
+
+	var buffer bytes.Buffer
+
+	buffer.WriteString("--")
+	buffer.WriteString(boundary)
+	buffer.WriteString("\nContent-Type: multipart/mixed; boundary=")
+	buffer.WriteString(changeset)
+	buffer.WriteString("\n")
+
+	uri := c.client.getEndpoint(tableServiceName, pathForTable(table), url.Values{})
+	for _, entity := range entities {
+		buffer.WriteString("--")
+		buffer.WriteString(changeset)
+		buffer.WriteString("\nContent-Type: application/http\nContent-Transfer-Encoding: binary\n\nPOST ")
+		buffer.WriteString(uri)
+		buffer.WriteString(" HTTP/1.1\nContent-Type: application/json\nAccept: application/json;odata=minimalmetadata\n")
+		buffer.WriteString("Prefer: return-no-content\nDataServiceVersion: 3.0;\n\n")
+
+		serializedEntity, err := serializeEntity(*entity)
+		if err != nil {
+			return nil, err
+		}
+		buffer.Write(serializedEntity.Bytes())
+		buffer.WriteString("\n")
+	}
+
+	buffer.WriteString("\n")
+	buffer.WriteString("--")
+	buffer.WriteString(changeset)
+	buffer.WriteString("--\n--")
+	buffer.WriteString(boundary)
+	buffer.WriteString("--")
+
+	return &buffer, nil
 }
 
 func (c *TableServiceClient) execTable(table AzureTable, entity TableEntity, method string) (int, error) {
 	uri := c.client.getEndpoint(tableServiceName, pathForTable(table), url.Values{})
-
 	headers := c.getStandardHeaders()
-
-	var buf *bytes.Buffer
-	var err error
-	if buf, err = serializeEntity(entity); err != nil {
+	buf, err := serializeEntity(entity)
+	if err != nil {
 		return 0, err
 	}
 

@@ -32,6 +32,9 @@ func NewUsagesCollection(domains map[string]*websites.WebsiteInfo) *UsagesCollec
 	}
 }
 
+// WebsiteConsumptions contains consumption records of the website for all the period
+type WebsiteConsumptions map[int][]*ConsumptionRecord
+
 // ConsumptionRecord contains information about traffic consumption of a website
 type ConsumptionRecord struct {
 	WebsiteID    int
@@ -91,14 +94,11 @@ func (usages *UsagesCollection) AddRecord(record *logsreader.LogRecord) {
 }
 
 // GetTrafficConsumption returns traffic consumptions of currently added log records
-func (usages *UsagesCollection) GetTrafficConsumption() []*ConsumptionRecord {
-	result := make([]*ConsumptionRecord, len(usages.usages))
-	i := 0
+func (usages *UsagesCollection) GetTrafficConsumption() WebsiteConsumptions {
+	result := WebsiteConsumptions{}
 	for _, value := range usages.usages {
-		result[i] = value
-		i++
+		result[value.WebsiteID] = append(result[value.WebsiteID], value)
 	}
-
 	return result
 }
 
