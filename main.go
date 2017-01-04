@@ -18,6 +18,10 @@ const (
 func main() {
 	log.Println("Initializing application. Reading settings")
 	settings, err := getSettings(settingsFile)
+	if err != nil {
+		log.Println(err)
+		return
+	}
 
 	log.Println("Getting domains list")
 	domains, err := websites.GetDomains(settings.WebsitesProvider)
