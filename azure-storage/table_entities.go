@@ -40,7 +40,7 @@ func (c *TableServiceClient) BatchInsert(table AzureTable, entities []*TableEnti
 	}
 	boundary := "batch_" + uuid
 	headers := map[string]string{
-		"x-ms-version":          "2015-02-21",
+		"x-ms-version":          "2015-12-11",
 		"x-ms-date":             currentTimeRfc1123Formatted(),
 		"Accept-Charset":        "UTF-8",
 		"Content-Type":          "multipart/mixed; boundary=" + boundary,
@@ -75,26 +75,26 @@ func buildBatchContent(c *TableServiceClient, boundary string, table AzureTable,
 	buffer.WriteString(boundary)
 	buffer.WriteString("\nContent-Type: multipart/mixed; boundary=")
 	buffer.WriteString(changeset)
-	buffer.WriteString("\n")
+	buffer.WriteString("\n\n")
 
 	uri := c.client.getEndpoint(tableServiceName, pathForTable(table), url.Values{})
 	for _, entity := range entities {
-		buffer.WriteString("--")
-		buffer.WriteString(changeset)
-		buffer.WriteString("\nContent-Type: application/http\nContent-Transfer-Encoding: binary\n\nPOST ")
-		buffer.WriteString(uri)
-		buffer.WriteString(" HTTP/1.1\nContent-Type: application/json\nAccept: application/json;odata=minimalmetadata\n")
-		buffer.WriteString("Prefer: return-no-content\nDataServiceVersion: 3.0;\n\n")
-
 		serializedEntity, err := serializeEntity(*entity)
 		if err != nil {
 			return nil, err
 		}
+
+		buffer.WriteString("--")
+		buffer.WriteString(changeset)
+		buffer.WriteString("\nContent-Type: application/http\nContent-Transfer-Encoding: binary\n\nPOST ")
+		buffer.WriteString(uri)
+		buffer.WriteString("() HTTP/1.1\nAccept: application/json;odata=minimalmetadata\nContent-Type: application/json\n")
+		buffer.WriteString("Prefer: return-no-content\nDataServiceVersion: 3.0;\n\n")
+
 		buffer.Write(serializedEntity.Bytes())
 		buffer.WriteString("\n")
 	}
 
-	buffer.WriteString("\n")
 	buffer.WriteString("--")
 	buffer.WriteString(changeset)
 	buffer.WriteString("--\n--")
