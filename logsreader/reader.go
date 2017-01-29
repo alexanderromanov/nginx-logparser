@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -13,9 +14,13 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+const (
+	logPath = "/var/log/nginx/access.log"
+)
+
 // ReadLogs read logs from server
-func ReadLogs(connection ConnectionInfo, readerState State, recordProcessor func(*LogRecord)) (*State, error) {
-	sftp, err := connectToServer(connection)
+func ReadLogs(conn ConnectionInfo, readerState State, recordProcessor func(*LogRecord)) (*State, error) {
+	sftp, err := connectToServer(conn)
 	if err != nil {
 		return nil, fmt.Errorf("fail to connect to server %s: %v", conn, err)
 	}
@@ -35,7 +40,7 @@ func ReadLogs(connection ConnectionInfo, readerState State, recordProcessor func
 		}
 	}
 
-	bytesRead, err := processRecords(sftp, "/var/log/nginx/access.log", logOffset, recordProcessor)
+	bytesRead, err := processRecords(sftp, logPath, logOffset, recordProcessor)
 	if err != nil {
 		return nil, err
 	}
@@ -72,16 +77,19 @@ func connectToServer(connection ConnectionInfo) (*sftp.Client, error) {
 }
 
 func findNotZippedLog(sftp *sftp.Client) string {
-	w := sftp.Walk("/var/log/nginx/")
+	logDir := filepath.Dir(logPath)
+	logName := filepath.Base(logPath)
+
+	w := sftp.Walk(logDir)
 	for w.Step() {
-		if err := w.Err(); err != nil {
+		if w.Err() != nil {
 			continue
 		}
 
 		fullPath := w.Path()
 		fileName := path.Base(fullPath)
 
-		if strings.HasPrefix(fileName, "access.log-") && !strings.HasSuffix(fileName, ".gz") {
+		if fileName != logName && strings.HasPrefix(fileName, logName) && !strings.HasSuffix(fileName, ".gz") {
 			return fullPath
 		}
 	}
