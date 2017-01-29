@@ -2,6 +2,7 @@ package logsreader
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -10,6 +11,10 @@ import (
 const (
 	stateFileNamePattern = "state_%d.json"
 )
+
+// ErrNoStateFile indicates that state file doesn't exist. Most likely this happens
+// because server is being processed first time
+var ErrNoStateFile = errors.New("state file doesn't exist")
 
 // State store information about state from previous connection
 type State struct {
@@ -23,19 +28,21 @@ type State struct {
 
 // GetState returns State object for given server
 func GetState(conn ConnectionInfo) (State, error) {
-	data, err := ioutil.ReadFile(buildStateFileName(conn))
+	fileName := buildStateFileName(conn)
+	data, err := ioutil.ReadFile(fileName)
 	if err != nil {
 		if os.IsNotExist(err) {
-			err = nil
+			err = ErrNoStateFile
+		} else {
+			err = fmt.Errorf("cannot read state from %s: %v", fileName, err)
 		}
 		return State{}, err
 	}
 
 	var stats stateJSON
 	err = json.Unmarshal(data, &stats)
-
 	if err != nil {
-		return State{}, err
+		return State{}, fmt.Errorf("cannot parse json from %s: %v", fileName, err)
 	}
 
 	return State{
@@ -52,12 +59,16 @@ func SaveState(conn ConnectionInfo, stats State) error {
 	}
 
 	data, err := json.Marshal(s)
-
 	if err != nil {
-		return err
+		return fmt.Errorf("cannot serialize state %v: %v", s, err)
 	}
 
-	ioutil.WriteFile(buildStateFileName(conn), data, 0777)
+	fileName := buildStateFileName(conn)
+	err = ioutil.WriteFile(fileName, data, 0777)
+	if err != nil {
+		return fmt.Errorf("cannot save state to file %s: %v", fileName, err)
+	}
+
 	return nil
 }
 

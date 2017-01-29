@@ -2,11 +2,11 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"log"
-	"sync"
-
 	"path/filepath"
+	"sync"
 
 	"github.com/alexanderromanov/nginx-logparser/consumptions"
 	"github.com/alexanderromanov/nginx-logparser/logsreader"
@@ -21,14 +21,14 @@ func main() {
 	log.Println("Initializing application. Reading settings")
 	settings, err := getSettings(settingsFile)
 	if err != nil {
-		log.Println(err)
+		log.Println("failed to read settings: " + err.Error())
 		return
 	}
 
 	log.Println("Getting domains list")
 	domains, err := websites.GetDomains(settings.WebsitesProvider)
 	if err != nil {
-		log.Println(err)
+		log.Println("failed to get domains list: " + err.Error())
 		return
 	}
 	log.Printf("%d domain records obtained\n", len(domains))
@@ -40,9 +40,9 @@ func main() {
 			defer wg.Done()
 			err := processLogs(settings, connection, domains)
 			if err != nil {
-				log.Println(err)
+				log.Printf("error when processing logs for %s: %v\n", connection, err)
 			}
-			log.Printf("%s logs are processed", connection.ServerName())
+			log.Printf("%s logs are processed\n", connection)
 		}(conn)
 	}
 	wg.Wait()
@@ -56,15 +56,15 @@ func processLogs(settings applicationSettings, conn logsreader.ConnectionInfo, d
 
 	logForServer("Getting connection state")
 	prevState, err := logsreader.GetState(conn)
-	if err != nil {
-		return err
+	if err != nil && err != logsreader.ErrNoStateFile {
+		return fmt.Errorf("cannot get connection state for %s: %v", conn, err)
 	}
 
 	usages := consumptions.NewUsagesCollection(domains)
 
 	newState, err := logsreader.ReadLogs(conn, prevState, usages.AddRecord)
 	if err != nil {
-		return err
+		return fmt.Errorf("cannot read logs for %s: %v", conn, err)
 	}
 
 	for _, domain := range usages.GetUnknownDomains() {
@@ -73,11 +73,17 @@ func processLogs(settings applicationSettings, conn logsreader.ConnectionInfo, d
 
 	logForServer("Saving connection state")
 	err = logsreader.SaveState(conn, *newState)
+	if err != nil {
+		return fmt.Errorf("cannot save state for %s: %v", conn, err)
+	}
 
 	consumptionRecords := usages.GetTrafficConsumption()
 	logForServer("Saving consumption records for %d websites", len(consumptionRecords))
 	err = consumptions.SaveConsumptions(settings.AzureStorage, consumptionRecords, serverName)
-	return err
+	if err != nil {
+		return fmt.Errorf("error when saving consumptions for %s: %v", conn, err)
+	}
+	return nil
 }
 
 // getSettings returns application settings stored in settingsFile

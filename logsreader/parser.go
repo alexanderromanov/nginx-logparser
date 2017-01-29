@@ -2,6 +2,7 @@ package logsreader
 
 import (
 	"errors"
+	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
@@ -35,29 +36,29 @@ func parseLine(line string) (*LogRecord, error) {
 
 	date, err := time.Parse("[02/Jan/2006:15:04:05 -0700]", results[1])
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("cannot parse date %s: %v", results[1], err)
 	}
 
 	duration, err := strconv.ParseFloat(results[2], 64)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("cannot parse duration %s: %v", results[2], err)
 	}
 
 	requestStrings := strings.Split(results[3], " ")
 	if len(requestStrings) < 3 {
-		return nil, errors.New("Fail to parse request string: " + results[3])
+		return nil, errors.New("failed to parse request string: " + results[3])
 	}
 	verb := requestStrings[0]
 	path := strings.Join(requestStrings[1:len(requestStrings)-1], " ")
 
 	httpStatusCode, err := strconv.Atoi(results[4])
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("cannot parse response code %s: %v", results[4], err)
 	}
 
 	size, err := strconv.Atoi(results[5])
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("cannot parse response size %s: %v", results[5], err)
 	}
 
 	return &LogRecord{
@@ -79,7 +80,7 @@ var lineSplitRegex = regexp.MustCompile(`\"(.*?)\"`)
 func splitLine(line string) ([]string, error) {
 	matches := lineSplitRegex.FindAllStringSubmatch(line, -1)
 	if len(matches) == 0 {
-		return nil, errors.New("Cannot split line: " + line)
+		return nil, errors.New("cannot split line: " + line)
 	}
 
 	result := make([]string, len(matches))

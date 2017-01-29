@@ -14,3 +14,7 @@ type ConnectionInfo struct {
 func (conn ConnectionInfo) ServerName() string {
 	return fmt.Sprintf("%s:%d", conn.Address, conn.Port)
 }
+
+func (conn ConnectionInfo) String() string {
+	return conn.ServerName()
+}
