@@ -18,6 +18,12 @@ const (
 	logPath = "/var/log/nginx/access.log"
 )
 
+// FileInfo provides information about file
+type FileInfo struct {
+	Name         string
+	ModifiedDate int64
+}
+
 // ReadLogs read logs from server
 func ReadLogs(conn ConnectionInfo, readerState State, recordProcessor func(*LogRecord)) (*State, error) {
 	sftp, err := connectToServer(conn)
@@ -26,15 +32,15 @@ func ReadLogs(conn ConnectionInfo, readerState State, recordProcessor func(*LogR
 	}
 	defer sftp.Close()
 
-	notZipped := findNotZippedLog(sftp)
+	previouslyRotated := findPreviouslyRotatedFile(sftp)
 
 	var logOffset int
-	if readerState.NotZippedLogFile == notZipped {
+	if previouslyRotated.isSame(readerState.RotatedLog) {
 		logOffset = readerState.BytesRead
 	} else {
 		logOffset = 0
 
-		_, err = processRecords(sftp, notZipped, readerState.BytesRead, recordProcessor)
+		_, err = processRecords(sftp, previouslyRotated.Name, readerState.BytesRead, recordProcessor)
 		if err != nil {
 			return nil, err
 		}
@@ -46,8 +52,8 @@ func ReadLogs(conn ConnectionInfo, readerState State, recordProcessor func(*LogR
 	}
 
 	newState := &State{
-		NotZippedLogFile: notZipped,
-		BytesRead:        bytesRead + logOffset,
+		RotatedLog: previouslyRotated,
+		BytesRead:  bytesRead + logOffset,
 	}
 
 	return newState, nil
@@ -76,7 +82,7 @@ func connectToServer(connection ConnectionInfo) (*sftp.Client, error) {
 	return sftp, nil
 }
 
-func findNotZippedLog(sftp *sftp.Client) string {
+func findPreviouslyRotatedFile(sftp *sftp.Client) (result FileInfo) {
 	logDir := filepath.Dir(logPath)
 	logName := filepath.Base(logPath)
 
@@ -90,11 +96,15 @@ func findNotZippedLog(sftp *sftp.Client) string {
 		fileName := path.Base(fullPath)
 
 		if fileName != logName && strings.HasPrefix(fileName, logName) && !strings.HasSuffix(fileName, ".gz") {
-			return fullPath
+			return FileInfo{Name: fullPath, ModifiedDate: w.Stat().ModTime().Unix()}
 		}
 	}
 
-	return ""
+	return
+}
+
+func (f FileInfo) isSame(other FileInfo) bool {
+	return other.Name == f.Name && other.ModifiedDate == f.ModifiedDate
 }
 
 func processRecords(client *sftp.Client, fileName string, readFrom int, recordProcessor func(*LogRecord)) (int, error) {

@@ -20,7 +20,7 @@ var ErrNoStateFile = errors.New("state file doesn't exist")
 type State struct {
 	// NotZippedLogFile stores the name of only log file that was not zipped yet except access.log.
 	// If this name changes it means that nginx has started new log file and archived access.log that we were reading last time
-	NotZippedLogFile string
+	RotatedLog FileInfo
 
 	// BytesRead stores Number of bytes that were already read from access.log
 	BytesRead int
@@ -46,16 +46,16 @@ func GetState(conn ConnectionInfo) (State, error) {
 	}
 
 	return State{
-		NotZippedLogFile: stats.LastLog,
-		BytesRead:        stats.BytesRead,
+		RotatedLog: FileInfo{Name: stats.RotatedLog.Name, ModifiedDate: stats.RotatedLog.Modified},
+		BytesRead:  stats.BytesRead,
 	}, nil
 }
 
 // SaveState saves State for given server
 func SaveState(conn ConnectionInfo, stats State) error {
 	s := stateJSON{
-		LastLog:   stats.NotZippedLogFile,
-		BytesRead: stats.BytesRead,
+		RotatedLog: fileInfoJSON{Name: stats.RotatedLog.Name, Modified: stats.RotatedLog.ModifiedDate},
+		BytesRead:  stats.BytesRead,
 	}
 
 	data, err := json.Marshal(s)
@@ -77,6 +77,11 @@ func buildStateFileName(conn ConnectionInfo) string {
 }
 
 type stateJSON struct {
-	LastLog   string `json:"log"`
-	BytesRead int    `json:"read"`
+	RotatedLog fileInfoJSON `json:"log"`
+	BytesRead  int          `json:"read"`
+}
+
+type fileInfoJSON struct {
+	Name     string `json:"name"`
+	Modified int64  `modified:"modified"`
 }
